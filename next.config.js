@@ -2,16 +2,12 @@
 const SourceTaggingPlugin = require('@antonmagnus/next-source-tagging');
 
 const nextConfig = {
-  output: 'standalone',
   experimental: {
-    serverActions: {
-      allowedOrigins: [
-        "pre-53c82329.fly.dev",
-        "localhost:3001",
-        "127.0.0.1:3001"
-      ],
+        serverActions: {
+      allowedOrigins: ['*.fly.dev'],
     },
   },
+  output: 'standalone',
   images: {
     remotePatterns: [
       {
