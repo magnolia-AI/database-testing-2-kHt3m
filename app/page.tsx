@@ -54,16 +54,41 @@ export default function TodoApp() {
   const loadData = async () => {
     try {
       setIsLoading(true)
-      const [todosData, categoriesData, statsData] = await Promise.all([
+      const [todosResponse, categoriesResponse, statsResponse] = await Promise.all([
         getTodos(),
         getCategories(),
         getTodoStats()
       ])
-      setTodos(todosData)
-      setCategories(categoriesData)
-      setStats(statsData)
+      
+      // Handle todos response
+      if (todosResponse.success) {
+        setTodos(todosResponse.todos)
+      } else {
+        console.error('Failed to load todos:', todosResponse.error)
+        setTodos([])
+      }
+      
+      // Handle categories response
+      if (categoriesResponse.success) {
+        setCategories(categoriesResponse.categories)
+      } else {
+        console.error('Failed to load categories:', categoriesResponse.error)
+        setCategories([])
+      }
+      
+      // Handle stats response
+      if (statsResponse.success) {
+        setStats(statsResponse.stats)
+      } else {
+        console.error('Failed to load stats:', statsResponse.error)
+        setStats({ total: 0, completed: 0, pending: 0, overdue: 0 })
+      }
     } catch (error) {
       console.error('Failed to load data:', error)
+      // Set default values on error
+      setTodos([])
+      setCategories([])
+      setStats({ total: 0, completed: 0, pending: 0, overdue: 0 })
     } finally {
       setIsLoading(false)
     }
@@ -77,15 +102,16 @@ export default function TodoApp() {
 
   // Filter todos based on current filters
   const filteredTodos = useMemo(() => {
-    let filtered = todos
+    // Ensure todos is always an array
+    let filtered = Array.isArray(todos) ? todos : []
 
     // Search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
       filtered = filtered.filter(todo =>
-        todo.title.toLowerCase().includes(query) ||
-        todo.description?.toLowerCase().includes(query) ||
-        todo.category?.name.toLowerCase().includes(query)
+        todo?.title?.toLowerCase().includes(query) ||
+        todo?.description?.toLowerCase().includes(query) ||
+        todo?.category?.name?.toLowerCase().includes(query)
       )
     }
 
@@ -247,3 +273,5 @@ export default function TodoApp() {
     </div>
   )
 }
+
+
