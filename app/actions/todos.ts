@@ -73,6 +73,34 @@ export async function createTodo(formData: FormData) {
     }
 
     // Get the highest order number to place new todo at the end
+
+export async function toggleTodo(id: string, completed: boolean) {
+  try {
+    await prisma.todo.update({
+      where: { id },
+      data: { completed },
+    });
+    revalidatePath('/');
+    return { success: true };
+  } catch (error) {
+    console.error('Error toggling todo:', error);
+    return { success: false, error: 'Failed to toggle todo' };
+  }
+}
+
+export async function getTodoStats() {
+  try {
+    const totalTodos = await prisma.todo.count();
+    const completedTodos = await prisma.todo.count({
+      where: { completed: true },
+    });
+    return { success: true, totalTodos, completedTodos };
+  } catch (error) {
+    console.error('Error fetching todo stats:', error);
+    return { success: false, error: 'Failed to fetch todo stats' };
+  }
+}
+
     const lastTodo = await prisma.todo.findFirst({
       orderBy: { order: 'desc' },
     })
