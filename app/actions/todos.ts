@@ -9,7 +9,7 @@ import { Priority } from '@prisma/client'
 const createTodoSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title too long'),
   description: z.string().optional(),
-  categoryId: z.string().optional(),
+  categoryId: z.string().nullable().optional(),
   priority: z.nativeEnum(Priority).default(Priority.MEDIUM),
   dueDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
 })
@@ -71,11 +71,18 @@ export async function createTodo(formData: FormData) {
       orderBy: { order: 'desc' },
     })
 
+    const data = {
+      ...validatedFields.data,
+      order: (lastTodo?.order || 0) + 1,
+    }
+    
+    // If categoryId is undefined, set it to null
+    if (data.categoryId === undefined) {
+      data.categoryId = null
+    }
+    
     const todo = await prisma.todo.create({
-      data: {
-        ...validatedFields.data,
-        order: (lastTodo?.order || 0) + 1,
-      },
+      data,
       include: {
         category: true,
       },
@@ -109,6 +116,12 @@ export async function updateTodo(formData: FormData) {
     }
 
     const { id, ...updateData } = validatedFields.data
+    
+    // If categoryId is undefined, set it to null
+    if (updateData.categoryId === undefined) {
+      updateData.categoryId = null
+    }
+    
     const todo = await prisma.todo.update({
       where: { id },
       data: updateData,
@@ -211,3 +224,6 @@ export async function getTodoStats() {
     return { success: false, error: 'Failed to fetch stats' }
   }
 }
+
+
+
