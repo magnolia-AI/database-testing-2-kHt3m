@@ -81,15 +81,9 @@ export async function createTodo(formData: FormData) {
 
     const newOrder = (maxOrder._max.order ?? 0) + 1
 
-    const { title, description, categoryId, priority, dueDate } = validatedFields.data
-
     await prisma.todo.create({
       data: {
-        title,
-        description,
-        categoryId,
-        priority,
-        dueDate,
+        ...validatedFields.data,
         order: newOrder,
       },
     })
@@ -102,37 +96,34 @@ export async function createTodo(formData: FormData) {
   }
 }
 
-
 export async function toggleTodo(id: string, completed: boolean) {
   try {
     await prisma.todo.update({
       where: { id },
       data: { completed },
-    });
-    revalidatePath('/');
-    return { success: true };
+    })
+    revalidatePath('/')
+    return { success: true }
   } catch (error) {
-    console.error('Error toggling todo:', error);
-    return { success: false, error: 'Failed to toggle todo' };
+    console.error('Error toggling todo:', error)
+    return { success: false, error: 'Failed to toggle todo' }
   }
 }
 
 export async function getTodoStats() {
   try {
-    const totalTodos = await prisma.todo.count();
-    const completedTodos = await prisma.todo.count({
-      where: { completed: true },
-    });
-    return { success: true, totalTodos, completedTodos };
+    const totalCount = await prisma.todo.count()
+    const completedCount = await prisma.todo.count({ where: { completed: true } })
+    return { success: true, totalCount, completedCount }
   } catch (error) {
-    console.error('Error fetching todo stats:', error);
-    return { success: false, error: 'Failed to fetch todo stats' };
+    console.error('Error fetching todo stats:', error)
+    return { success: false, error: 'Failed to fetch todo stats' }
   }
 }
 
 export async function updateTodo(formData: FormData) {
   try {
-    const updateData = {
+    const validatedFields = updateTodoSchema.safeParse({
       id: formData.get('id'),
       title: formData.get('title'),
       description: formData.get('description'),
@@ -140,9 +131,7 @@ export async function updateTodo(formData: FormData) {
       categoryId: formData.get('categoryId'),
       priority: formData.get('priority'),
       dueDate: formData.get('dueDate'),
-    }
-
-    const validatedFields = updateTodoSchema.safeParse(updateData)
+    })
 
     if (!validatedFields.success) {
       return {
@@ -150,19 +139,16 @@ export async function updateTodo(formData: FormData) {
         errors: validatedFields.error.flatten().fieldErrors,
       }
     }
-    
-    const data = validatedFields.data
-    if (data.categoryId === undefined) {
-      data.categoryId = null
-    }
 
-    const todo = await prisma.todo.update({
-      where: { id: validatedFields.data.id },
-      data,
+    const { id, ...dataToUpdate } = validatedFields.data
+
+    await prisma.todo.update({
+      where: { id },
+      data: dataToUpdate,
     })
 
     revalidatePath('/')
-    return { success: true, todo }
+    return { success: true }
   } catch (error) {
     console.error('Error updating todo:', error)
     return { success: false, error: 'Failed to update todo' }
@@ -170,16 +156,109 @@ export async function updateTodo(formData: FormData) {
 }
 
 export async function deleteTodo(id: string) {
+    try {
+        await prisma.todo.delete({
+            where: { id },
+        });
+        revalidatePath('/');
+        return { success: true };
+    } catch (error) {
+        console.error('Error deleting todo:', error);
+        return { success: false, error: 'Failed to delete todo' };
+    }
+}
+
+export async function reorderTodos(
+  draggedId: string,
+  droppedId: string
+) {
   try {
-    await prisma.todo.delete({
-      where: { id },
-    })
+    const draggedTodo = await prisma.todo.findUnique({ where: { id: draggedId } })
+    const droppedTodo = await prisma.todo.findUnique({ where: { id: droppedId } })
+
+    if (!draggedTodo || !droppedTodo) {
+      throw new Error('Could not find one or both of the todos to reorder.')
+    }
+
+    // If the todos are in the same completion status
+    if (draggedTodo.completed === droppedTodo.completed) {
+      const startOrder = Math.min(draggedTodo.order, droppedTodo.order)
+      const endOrder = Math.max(draggedTodo.order, droppedTodo.order)
+
+      if (draggedTodo.order < droppedTodo.order) {
+        // Dragging down
+        await prisma.$transaction([
+          // Shift items up
+          prisma.todo.updateMany({
+            where: {
+              completed: draggedTodo.completed,
+              order: { gt: startOrder, lte: endOrder },
+            },
+            data: { order: { decrement: 1 } },
+          }),
+          // Place dragged item
+          prisma.todo.update({
+            where: { id: draggedId },
+            data: { order: endOrder },
+          }),
+        ])
+      } else {
+        // Dragging up
+        await prisma.$transaction([
+          // Shift items down
+          prisma.todo.updateMany({
+            where: {
+              completed: draggedTodo.completed,
+              order: { gte: endOrder, lt: startOrder },
+            },
+            data: { order: { increment: 1 } },
+          }),
+          // Place dragged item
+          prisma.todo.update({
+            where: { id: draggedId },
+            data: { order: endOrder },
+          }),
+        ])
+      }
+    } else {
+      // Moving between completed and incomplete lists
+      const oldOrder = draggedTodo.order
+      const newCompletedStatus = droppedTodo.completed
+      const newOrder = droppedTodo.order
+
+      // 1. Decrement order of all items in the old list that were after the dragged item
+      await prisma.todo.updateMany({
+        where: {
+          completed: draggedTodo.completed,
+          order: { gt: oldOrder },
+        },
+        data: { order: { decrement: 1 } },
+      })
+
+      // 2. Increment order of all items in the new list at or after the drop position
+      await prisma.todo.updateMany({
+        where: {
+          completed: newCompletedStatus,
+          order: { gte: newOrder },
+        },
+        data: { order: { increment: 1 } },
+      })
+
+      // 3. Update the dragged todo itself
+      await prisma.todo.update({
+        where: { id: draggedId },
+        data: {
+          completed: newCompletedStatus,
+          order: newOrder,
+        },
+      })
+    }
 
     revalidatePath('/')
     return { success: true }
   } catch (error) {
-    console.error('Error deleting todo:', error)
-    return { success: false, error: 'Failed to delete todo' }
+    console.error('Error reordering todos:', error)
+    return { success: false, error: 'Failed to reorder todos' }
   }
 }
 
