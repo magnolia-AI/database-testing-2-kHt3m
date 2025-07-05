@@ -9,7 +9,10 @@ import { Priority } from '@prisma/client'
 const createTodoSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title too long'),
   description: z.string().optional(),
-  categoryId: z.string().nullable().optional(),
+  categoryId: z.preprocess(
+    (val) => (val === '' ? null : val),
+    z.string().nullable().optional()
+  ),
   priority: z.nativeEnum(Priority).default(Priority.MEDIUM),
   dueDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
 })
@@ -19,7 +22,10 @@ const updateTodoSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200, 'Title too long').optional(),
   description: z.string().optional(),
   completed: z.boolean().optional(),
-  categoryId: z.string().optional(),
+  categoryId: z.preprocess(
+    (val) => (val === '' ? null : val),
+    z.string().nullable().optional()
+  ),
   priority: z.nativeEnum(Priority).optional(),
   dueDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
 })
@@ -54,7 +60,7 @@ export async function createTodo(formData: FormData) {
     const validatedFields = createTodoSchema.safeParse({
       title: formData.get('title'),
       description: formData.get('description'),
-      categoryId: formData.get('categoryId') || undefined,
+      categoryId: formData.get('categoryId'),
       priority: formData.get('priority') || Priority.MEDIUM,
       dueDate: formData.get('dueDate'),
     })
@@ -73,20 +79,14 @@ export async function createTodo(formData: FormData) {
 
     const data = {
       ...validatedFields.data,
-      order: (lastTodo?.order || 0) + 1,
+      order: lastTodo ? lastTodo.order + 1 : 0,
     }
     
-    // If categoryId is undefined, set it to null
     if (data.categoryId === undefined) {
       data.categoryId = null
     }
-    
-    const todo = await prisma.todo.create({
-      data,
-      include: {
-        category: true,
-      },
-    })
+
+    const todo = await prisma.todo.create({ data })
 
     revalidatePath('/')
     return { success: true, todo }
@@ -98,15 +98,17 @@ export async function createTodo(formData: FormData) {
 
 export async function updateTodo(formData: FormData) {
   try {
-    const validatedFields = updateTodoSchema.safeParse({
+    const updateData = {
       id: formData.get('id'),
       title: formData.get('title'),
       description: formData.get('description'),
       completed: formData.get('completed') === 'true',
-      categoryId: formData.get('categoryId') || undefined,
+      categoryId: formData.get('categoryId'),
       priority: formData.get('priority'),
       dueDate: formData.get('dueDate'),
-    })
+    }
+
+    const validatedFields = updateTodoSchema.safeParse(updateData)
 
     if (!validatedFields.success) {
       return {
@@ -114,20 +116,15 @@ export async function updateTodo(formData: FormData) {
         errors: validatedFields.error.flatten().fieldErrors,
       }
     }
-
-    const { id, ...updateData } = validatedFields.data
     
-    // If categoryId is undefined, set it to null
-    if (updateData.categoryId === undefined) {
-      updateData.categoryId = null
+    const data = validatedFields.data
+    if (data.categoryId === undefined) {
+      data.categoryId = null
     }
-    
+
     const todo = await prisma.todo.update({
-      where: { id },
-      data: updateData,
-      include: {
-        category: true,
-      },
+      where: { id: validatedFields.data.id },
+      data,
     })
 
     revalidatePath('/')
@@ -138,12 +135,11 @@ export async function updateTodo(formData: FormData) {
   }
 }
 
-export async function deleteTodo(todoId: string) {
+export async function deleteTodo(id: string) {
   try {
     await prisma.todo.delete({
-      where: { id: todoId },
+      where: { id },
     })
-
     revalidatePath('/')
     return { success: true }
   } catch (error) {
@@ -152,43 +148,68 @@ export async function deleteTodo(todoId: string) {
   }
 }
 
-export async function toggleTodoComplete(todoId: string) {
+export async function reorderTodos(
+  todoId: string,
+  newOrder: number,
+) {
   try {
-    const todo = await prisma.todo.findUnique({
-      where: { id: todoId },
-    })
-
-    if (!todo) {
-      return { success: false, error: 'Todo not found' }
+    const validatedFields = reorderTodosSchema.safeParse({ todoId, newOrder })
+    if (!validatedFields.success) {
+      return {
+        success: false,
+        errors: validatedFields.error.flatten().fieldErrors,
+      }
     }
 
-    const updatedTodo = await prisma.todo.update({
-      where: { id: todoId },
-      data: { completed: !todo.completed },
-      include: {
-        category: true,
-      },
+    const { todoId: id, newOrder: order } = validatedFields.data
+
+    // Get the current todo to find its old order
+    const currentTodo = await prisma.todo.findUnique({ where: { id } })
+    if (!currentTodo) {
+      return { success: false, error: 'Todo not found' }
+    }
+    const oldOrder = currentTodo.order
+
+    // Determine the range of todos to update
+    if (order > oldOrder) {
+      // Moving down: decrement order of todos between old and new order
+      await prisma.todo.updateMany({
+        where: {
+          order: {
+            gt: oldOrder,
+            lte: order,
+          },
+          id: { not: id },
+        },
+        data: {
+          order: {
+            decrement: 1,
+          },
+        },
+      })
+    } else {
+      // Moving up: increment order of todos between new and old order
+      await prisma.todo.updateMany({
+        where: {
+          order: {
+            gte: order,
+            lt: oldOrder,
+          },
+          id: { not: id },
+        },
+        data: {
+          order: {
+            increment: 1,
+          },
+        },
+      })
+    }
+
+    // Update the dragged todo's order
+    await prisma.todo.update({
+      where: { id },
+      data: { order },
     })
-
-    revalidatePath('/')
-    return { success: true, todo: updatedTodo }
-  } catch (error) {
-    console.error('Error toggling todo:', error)
-    return { success: false, error: 'Failed to toggle todo' }
-  }
-}
-
-export async function reorderTodos(updates: { id: string; order: number }[]) {
-  try {
-    // Use a transaction to update all orders atomically
-    await prisma.$transaction(
-      updates.map(({ id, order }) =>
-        prisma.todo.update({
-          where: { id },
-          data: { order },
-        })
-      )
-    )
 
     revalidatePath('/')
     return { success: true }
@@ -197,33 +218,4 @@ export async function reorderTodos(updates: { id: string; order: number }[]) {
     return { success: false, error: 'Failed to reorder todos' }
   }
 }
-
-// Get todo statistics
-export async function getTodoStats() {
-  try {
-    const [total, completed, pending, overdue] = await Promise.all([
-      prisma.todo.count(),
-      prisma.todo.count({ where: { completed: true } }),
-      prisma.todo.count({ where: { completed: false } }),
-      prisma.todo.count({
-        where: {
-          completed: false,
-          dueDate: {
-            lt: new Date(),
-          },
-        },
-      }),
-    ])
-
-    return {
-      success: true,
-      stats: { total, completed, pending, overdue },
-    }
-  } catch (error) {
-    console.error('Error fetching todo stats:', error)
-    return { success: false, error: 'Failed to fetch stats' }
-  }
-}
-
-
 
