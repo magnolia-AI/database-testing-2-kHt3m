@@ -73,6 +73,35 @@ export async function createTodo(formData: FormData) {
     }
 
     // Get the highest order number to place new todo at the end
+    const maxOrder = await prisma.todo.aggregate({
+      _max: {
+        order: true,
+      },
+    })
+
+    const newOrder = (maxOrder._max.order ?? 0) + 1
+
+    const { title, description, categoryId, priority, dueDate } = validatedFields.data
+
+    await prisma.todo.create({
+      data: {
+        title,
+        description,
+        categoryId,
+        priority,
+        dueDate,
+        order: newOrder,
+      },
+    })
+
+    revalidatePath('/')
+    return { success: true }
+  } catch (error) {
+    console.error('Error creating todo:', error)
+    return { success: false, error: 'Failed to create todo' }
+  }
+}
+
 
 export async function toggleTodo(id: string, completed: boolean) {
   try {
@@ -98,29 +127,6 @@ export async function getTodoStats() {
   } catch (error) {
     console.error('Error fetching todo stats:', error);
     return { success: false, error: 'Failed to fetch todo stats' };
-  }
-}
-
-    const lastTodo = await prisma.todo.findFirst({
-      orderBy: { order: 'desc' },
-    })
-
-    const data = {
-      ...validatedFields.data,
-      order: lastTodo ? lastTodo.order + 1 : 0,
-    }
-    
-    if (data.categoryId === undefined) {
-      data.categoryId = null
-    }
-
-    const todo = await prisma.todo.create({ data })
-
-    revalidatePath('/')
-    return { success: true, todo }
-  } catch (error) {
-    console.error('Error creating todo:', error)
-    return { success: false, error: 'Failed to create todo' }
   }
 }
 
@@ -168,82 +174,12 @@ export async function deleteTodo(id: string) {
     await prisma.todo.delete({
       where: { id },
     })
+
     revalidatePath('/')
     return { success: true }
   } catch (error) {
     console.error('Error deleting todo:', error)
     return { success: false, error: 'Failed to delete todo' }
-  }
-}
-
-export async function reorderTodos(
-  todoId: string,
-  newOrder: number,
-) {
-  try {
-    const validatedFields = reorderTodosSchema.safeParse({ todoId, newOrder })
-    if (!validatedFields.success) {
-      return {
-        success: false,
-        errors: validatedFields.error.flatten().fieldErrors,
-      }
-    }
-
-    const { todoId: id, newOrder: order } = validatedFields.data
-
-    // Get the current todo to find its old order
-    const currentTodo = await prisma.todo.findUnique({ where: { id } })
-    if (!currentTodo) {
-      return { success: false, error: 'Todo not found' }
-    }
-    const oldOrder = currentTodo.order
-
-    // Determine the range of todos to update
-    if (order > oldOrder) {
-      // Moving down: decrement order of todos between old and new order
-      await prisma.todo.updateMany({
-        where: {
-          order: {
-            gt: oldOrder,
-            lte: order,
-          },
-          id: { not: id },
-        },
-        data: {
-          order: {
-            decrement: 1,
-          },
-        },
-      })
-    } else {
-      // Moving up: increment order of todos between new and old order
-      await prisma.todo.updateMany({
-        where: {
-          order: {
-            gte: order,
-            lt: oldOrder,
-          },
-          id: { not: id },
-        },
-        data: {
-          order: {
-            increment: 1,
-          },
-        },
-      })
-    }
-
-    // Update the dragged todo's order
-    await prisma.todo.update({
-      where: { id },
-      data: { order },
-    })
-
-    revalidatePath('/')
-    return { success: true }
-  } catch (error) {
-    console.error('Error reordering todos:', error)
-    return { success: false, error: 'Failed to reorder todos' }
   }
 }
 
