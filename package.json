@@ -9,7 +9,10 @@
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
-    "postinstall": "npx prisma generate --schema=./prisma/schema.prisma"
+    "postinstall": "npx prisma generate --schema=./prisma/schema.prisma",
+    "prisma": {
+      "seed": "ts-node prisma/seed.ts"
+    }
   },
   "dependencies": {
     "@clerk/nextjs": "^6.22.0",
