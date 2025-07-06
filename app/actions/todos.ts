@@ -156,16 +156,16 @@ export async function updateTodo(formData: FormData) {
 }
 
 export async function deleteTodo(id: string) {
-    try {
-        await prisma.todo.delete({
-            where: { id },
-        });
-        revalidatePath('/');
-        return { success: true };
-    } catch (error) {
-        console.error('Error deleting todo:', error);
-        return { success: false, error: 'Failed to delete todo' };
-    }
+  try {
+    await prisma.todo.delete({
+      where: { id },
+    })
+    revalidatePath('/')
+    return { success: true }
+  } catch (error) {
+    console.error('Error deleting todo:', error)
+    return { success: false, error: 'Failed to delete todo' }
+  }
 }
 
 export async function reorderTodos(
@@ -261,4 +261,3 @@ export async function reorderTodos(
     return { success: false, error: 'Failed to reorder todos' }
   }
 }
-
